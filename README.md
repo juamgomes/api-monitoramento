@@ -19,6 +19,7 @@ API em `FastAPI` para monitorar servidores Linux e containers Docker via SSH. El
 - containers esperados ausentes
 - healthcheck Docker quando estiver disponivel no `Status`
 - erros encontrados nos logs dos containers monitorados
+- automacao de remediacao por palavra-chave em log com historico persistido
 
 ## Limitacoes assumidas
 
@@ -70,6 +71,11 @@ uvicorn app.main:app --reload
   "log_monitored_containers": ["api", "worker"],
   "log_tail_lines": 200,
   "log_error_patterns": ["error", "exception", "traceback", "fatal"],
+  "automation_enabled": true,
+  "automation_target_container": "worker",
+  "automation_trigger_pattern": "untrusted",
+  "automation_command": "sh reiniciar_certificado.sh",
+  "automation_cooldown_seconds": 600,
   "root_disk_path": "/",
   "warning_disk_percent": 80,
   "critical_disk_percent": 90,
@@ -95,11 +101,29 @@ Quando houver matches, o snapshot passa a retornar:
 
 - `log_alerts_total`
 - `log_alerts[]` com o nome do container, quantidade de ocorrencias, padroes encontrados, trechos de log e falhas de coleta
+- `automation_events[]` quando uma automacao de remediacao for disparada no mesmo snapshot
 
 Observacao:
 
 - o monitoramento de logs depende de `monitor_docker=true`
 - se `monitor_container_logs=true`, e obrigatorio informar ao menos um item em `log_monitored_containers`
+
+## Automacao por log
+
+Se quiser reagir automaticamente a um erro especifico de log, configure estes campos no servidor:
+
+- `automation_enabled=true`
+- `automation_target_container`: container que dispara a remediacao
+- `automation_trigger_pattern`: palavra ou regex que deve aparecer no log, por exemplo `untrusted`
+- `automation_command`: comando remoto a executar no mesmo host monitorado
+- `automation_cooldown_seconds`: janela minima entre tentativas novas com assinaturas diferentes
+
+Comportamento desta versao:
+
+- a API executa a automacao no mesmo servidor monitorado via SSH
+- o mesmo trecho de log nao dispara a automacao repetidamente
+- toda tentativa fica salva em `automation_events`, com horario, comando, status, erro e trecho do log que causou a acao
+- o servidor tambem passa a expor `last_automation_at` e `last_automation_status`
 
 ## Endpoints principais
 
@@ -109,6 +133,15 @@ Observacao:
 - `PATCH /api/servers/{id}`: atualiza thresholds ou credenciais
 - `POST /api/servers/{id}/collect`: forca uma coleta imediata
 - `GET /api/servers/{id}/snapshots`: historico recente
+- `GET /api/automation-events`: historico global das automacoes
+- `GET /api/servers/{id}/automation-events`: historico da automacao de um servidor
+- `GET /api/servers/{id}/automation-status`: mostra se a automacao esta `active`, `paused` ou `misconfigured`
+- `POST /api/servers/{id}/automation/activate`: ativa a automacao configurada para o servidor
+- `POST /api/servers/{id}/automation/pause`: pausa a automacao sem apagar a configuracao
+
+Observacao:
+
+- `GET /api/servers` e `GET /api/dashboard` agora tambem retornam `automation_status`, `automation_active`, `automation_configured` e `automation_status_reason` em cada servidor
 
 Se `API_KEY` estiver definida no `.env`, envie o header `X-API-Key`.
 
@@ -118,10 +151,14 @@ Se algum host tiver muitos containers ou Docker mais lento, voce pode aumentar s
 DOCKER_COMMAND_TIMEOUT_SECONDS=45
 DOCKER_LOGS_COMMAND_TIMEOUT_SECONDS=120
 DOCKER_LOGS_FALLBACK_TAIL_LINES=50
+AUTOMATION_COMMAND_TIMEOUT_SECONDS=120
+AUTOMATION_HISTORY_LIMIT_PER_SERVER=500
 ```
 
 `DOCKER_LOGS_COMMAND_TIMEOUT_SECONDS` controla apenas a leitura de logs.
 `DOCKER_LOGS_FALLBACK_TAIL_LINES` define quantas linhas tentar no retry automatico quando `docker logs` estourar tempo.
+`AUTOMATION_COMMAND_TIMEOUT_SECONDS` controla o tempo maximo do comando corretivo remoto.
+`AUTOMATION_HISTORY_LIMIT_PER_SERVER` limita quantos eventos de automacao ficam salvos por servidor.
 
 ## CORS
 

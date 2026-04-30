@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -248,6 +248,10 @@ class ServerRead(BaseModel):
     automation_trigger_pattern: str | None
     automation_command: str | None
     automation_cooldown_seconds: int
+    automation_configured: bool
+    automation_active: bool
+    automation_status: Literal["active", "paused", "misconfigured"]
+    automation_status_reason: str | None
     enabled: bool
     root_disk_path: str
     warning_disk_percent: int
@@ -265,6 +269,25 @@ class ServerRead(BaseModel):
     last_automation_at: datetime | None
     last_automation_status: str | None
     created_at: datetime
+    updated_at: datetime
+
+
+class AutomationStatusRead(BaseModel):
+    server_id: int
+    server_name: str
+    automation_enabled: bool
+    automation_configured: bool
+    automation_active: bool
+    automation_status: Literal["active", "paused", "misconfigured"]
+    automation_status_reason: str | None
+    monitor_container_logs: bool
+    automation_target_container: str | None
+    automation_trigger_pattern: str | None
+    automation_command: str | None
+    automation_cooldown_seconds: int
+    last_checked_at: datetime | None
+    last_automation_at: datetime | None
+    last_automation_status: str | None
     updated_at: datetime
 
 

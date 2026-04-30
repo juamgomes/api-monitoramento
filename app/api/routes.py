@@ -14,6 +14,7 @@ from app.models import AutomationEvent, MonitoredServer, ServerSnapshot
 from app.schemas import (
     AutomationDashboardSummaryRead,
     AutomationEventRead,
+    AutomationStatusRead,
     DashboardRead,
     ServerCreate,
     ServerRead,
@@ -69,6 +70,42 @@ def normalize_automation_configuration(server: MonitoredServer) -> None:
     )
 
 
+def get_automation_status_metadata(server: MonitoredServer) -> tuple[bool, bool, str, str | None]:
+    configured = bool(
+        server.monitor_container_logs
+        and server.automation_target_container
+        and server.automation_trigger_pattern
+        and server.automation_command
+    )
+    if not server.automation_enabled:
+        return configured, False, "paused", "Automacao pausada manualmente."
+    if not configured:
+        return False, False, "misconfigured", "Automacao habilitada, mas com configuracao incompleta."
+    return True, True, "active", None
+
+
+def serialize_automation_status(server: MonitoredServer) -> AutomationStatusRead:
+    configured, active, status_name, status_reason = get_automation_status_metadata(server)
+    return AutomationStatusRead(
+        server_id=server.id,
+        server_name=server.name,
+        automation_enabled=server.automation_enabled,
+        automation_configured=configured,
+        automation_active=active,
+        automation_status=status_name,
+        automation_status_reason=status_reason,
+        monitor_container_logs=server.monitor_container_logs,
+        automation_target_container=server.automation_target_container,
+        automation_trigger_pattern=server.automation_trigger_pattern,
+        automation_command=server.automation_command,
+        automation_cooldown_seconds=server.automation_cooldown_seconds,
+        last_checked_at=server.last_checked_at,
+        last_automation_at=server.last_automation_at,
+        last_automation_status=server.last_automation_status,
+        updated_at=server.updated_at,
+    )
+
+
 def serialize_automation_event(event: AutomationEvent) -> AutomationEventRead:
     return AutomationEventRead.model_validate(
         {
@@ -95,6 +132,7 @@ def serialize_automation_event(event: AutomationEvent) -> AutomationEventRead:
 
 
 def serialize_server(server: MonitoredServer) -> ServerRead:
+    automation_status = serialize_automation_status(server)
     return ServerRead.model_validate(
         {
             "id": server.id,
@@ -115,6 +153,10 @@ def serialize_server(server: MonitoredServer) -> ServerRead:
             "automation_trigger_pattern": server.automation_trigger_pattern,
             "automation_command": server.automation_command,
             "automation_cooldown_seconds": server.automation_cooldown_seconds,
+            "automation_configured": automation_status.automation_configured,
+            "automation_active": automation_status.automation_active,
+            "automation_status": automation_status.automation_status,
+            "automation_status_reason": automation_status.automation_status_reason,
             "enabled": server.enabled,
             "root_disk_path": server.root_disk_path,
             "warning_disk_percent": server.warning_disk_percent,
@@ -357,3 +399,60 @@ async def list_server_automation_events(
         .limit(limit),
     )
     return [serialize_automation_event(event) for event in rows]
+
+
+@api_router.get(
+    "/servers/{server_id}/automation-status",
+    response_model=AutomationStatusRead,
+    tags=["automation"],
+)
+async def get_server_automation_status(
+    server_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> AutomationStatusRead:
+    server = await session.get(MonitoredServer, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="Servidor nao encontrado.")
+    return serialize_automation_status(server)
+
+
+@api_router.post(
+    "/servers/{server_id}/automation/activate",
+    response_model=AutomationStatusRead,
+    tags=["automation"],
+)
+async def activate_server_automation(
+    server_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> AutomationStatusRead:
+    server = await session.get(MonitoredServer, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="Servidor nao encontrado.")
+
+    server.automation_enabled = True
+    normalize_automation_configuration(server)
+    validate_container_log_configuration(server)
+    session.add(server)
+    await session.commit()
+    await session.refresh(server)
+    return serialize_automation_status(server)
+
+
+@api_router.post(
+    "/servers/{server_id}/automation/pause",
+    response_model=AutomationStatusRead,
+    tags=["automation"],
+)
+async def pause_server_automation(
+    server_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> AutomationStatusRead:
+    server = await session.get(MonitoredServer, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="Servidor nao encontrado.")
+
+    server.automation_enabled = False
+    session.add(server)
+    await session.commit()
+    await session.refresh(server)
+    return serialize_automation_status(server)
