@@ -1,0 +1,15 @@
+DEFAULT_LOG_ERROR_PATTERNS = [
+    "error",
+    "exception",
+    "traceback",
+    "fatal",
+    "panic",
+    "critical",
+    "failed",
+]
+
+DEFAULT_LOG_TAIL_LINES = 200
+DEFAULT_LOG_EXCERPT_LINES = 10
+DEFAULT_AUTOMATION_TRIGGER_PATTERN = "untrusted"
+DEFAULT_AUTOMATION_COOLDOWN_SECONDS = 600
+DEFAULT_AUTOMATION_OUTPUT_MAX_CHARS = 4000
